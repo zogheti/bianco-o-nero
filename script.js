@@ -270,6 +270,7 @@ async function joinMultiplayerRoom() {
             updatedAt: firebase.database.ServerValue.TIMESTAMP
         });
 
+        // Passa hostName come p1 e guestName come p2 in modo che la prospettiva del sorteggio sia identica
         openCoinTossModal(hostName, guestName, blackPlayer);
     } else {
         alert('Stanza già piena o partita in corso!');
@@ -482,6 +483,7 @@ async function applyMove(row, col, color, flipped) {
 }
 
 // --- MULTIPLAYER LISTENER ---
+// --- NEL MULTIPLAYER LISTENER (quando l'host avvia il sorteggio o fa la rivincita) ---
 function setupMultiplayerListener() {
     let lastRematchTimestamp = 0;
 
@@ -506,8 +508,9 @@ function setupMultiplayerListener() {
 
             document.getElementById('gameover-modal').classList.add('hidden');
 
-            const p1Name = (gameState.playerRoleInRoom === 'host') ? data.host : data.guest;
-            const p2Name = (gameState.playerRoleInRoom === 'host') ? data.guest : data.host;
+            // Definisce l'ordine visivo coerente per il sorteggio (Host a sinistra, Guest a destra)
+            const p1Name = data.host;
+            const p2Name = data.guest;
 
             openCoinTossModal(p1Name, p2Name, gameState.blackName);
             return;
