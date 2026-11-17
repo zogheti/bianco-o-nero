@@ -254,6 +254,7 @@ async function joinMultiplayerRoom() {
         gameState.winsP1 = roomData.winsHost || 0;
         gameState.winsP2 = roomData.winsGuest || 0;
 
+        // L'Host decide e salva il sorteggio una sola volta su Firebase per sincronizzare entrambi i client
         const hostIsBlack = Math.random() < 0.5;
         const blackPlayer = hostIsBlack ? hostName : guestName;
         const whitePlayer = hostIsBlack ? guestName : hostName;
@@ -299,6 +300,7 @@ function openCoinTossModal(p1, p2, blackName, whiteName) {
 
     setTimeout(() => {
         coin.classList.remove('spinning');
+        // Usa i nomi salvati per determinare la rotazione esatta su entrambi i dispositivi
         coin.style.transform = (blackName === p1) ? 'rotateY(0deg)' : 'rotateY(180deg)';
 
         playSound('place');
@@ -456,18 +458,20 @@ async function applyMove(row, col, color, flipped) {
             status: isGameOver ? 'finished' : 'playing',
             updatedAt: firebase.database.ServerValue.TIMESTAMP
         });
-    } else {
-        renderBoard(statusNote);
-        if (isGameOver) {
-            showGameOver();
-            return;
-        }
-        if (gameState.currentTurn !== gameState.myColor) {
-            triggerAIMove();
-        }
     }
 
-    gameState.isProcessing = false;
+    renderBoard(statusNote);
+
+    if (isGameOver) {
+        showGameOver();
+        return;
+    }
+
+    if (gameState.mode === 'single' && gameState.currentTurn !== gameState.myColor) {
+        triggerAIMove();
+    } else {
+        gameState.isProcessing = false;
+    }
 }
 
 // --- MULTIPLAYER LISTENER ---
@@ -485,7 +489,6 @@ function setupMultiplayerListener() {
             return;
         }
 
-        // Ascolta il timestamp della rivincita per sincronizzare i due giocatori
         if (data.rematchTimestamp && data.rematchTimestamp !== lastRematchTimestamp) {
             lastRematchTimestamp = data.rematchTimestamp;
             gameState.blackName = data.blackPlayer;
@@ -501,7 +504,7 @@ function setupMultiplayerListener() {
             return;
         }
 
-        if (data.board && data.status !== 'finished') {
+        if (data.board) {
             const turnChanged = gameState.lastMove?.[0] !== data.lastMove?.[0] ||
                 gameState.lastMove?.[1] !== data.lastMove?.[1];
             if (turnChanged && data.lastMove) playSound('place');
@@ -694,7 +697,6 @@ function showGameOver() {
         sub.textContent = 'Stesso numero di pedine.';
     }
 
-    // Calcolo vincitore per le statistiche di sessione
     if (winningColor !== null) {
         const winnerName = (winningColor === BLACK) ? gameState.blackName : gameState.whiteName;
         if (winnerName === gameState.playerName) {
@@ -713,14 +715,12 @@ function showGameOver() {
 }
 
 async function requestRematch() {
-    // Inverti i ruoli per la rivincita (chi era nero diventa bianco e viceversa)
     const oldBlack = gameState.blackName;
     gameState.blackName = gameState.whiteName;
     gameState.whiteName = oldBlack;
     gameState.myColor = (gameState.blackName === gameState.playerName) ? BLACK : WHITE;
 
     if (gameState.mode === 'multi' && gameState.roomRef) {
-        // Aggiorna Firebase con un timestamp univoco per sbloccare la rivincita su entrambi i dispositivi
         await gameState.roomRef.update({
             status: 'playing',
             board: createInitialBoard(),
