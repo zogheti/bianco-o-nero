@@ -222,6 +222,9 @@ async function joinMultiplayerRoom() {
             updatedAt: firebase.database.ServerValue.TIMESTAMP
         });
 
+        // Pulisce automaticamente la stanza se l'host chiude la pagina o si disconnette
+        roomRef.onDisconnect().remove();
+
         waitingMsg.textContent = `Stanza ${code} creata. In attesa dell'avversario...`;
         waitingMsg.classList.remove('hidden');
 
@@ -270,6 +273,10 @@ async function joinMultiplayerRoom() {
             updatedAt: firebase.database.ServerValue.TIMESTAMP
         });
 
+        // Se il guest si disconnette, rimuove il proprio nome liberando la stanza
+        roomRef.child('guest').onDisconnect().remove();
+        roomRef.child('status').onDisconnect().set('waiting');
+
         openCoinTossModal(hostName, guestName, blackPlayer);
     } else {
         alert('Stanza già piena o partita in corso!');
@@ -300,10 +307,6 @@ function openCoinTossModal(p1, p2, blackPlayerName) {
     setTimeout(() => {
         coin.classList.remove('spinning');
 
-        // CORREZIONE PROSPETTICA:
-        // Se il giocatore locale è l'Host (p1): p1 è a sinistra, quindi NERO (0deg) se blackPlayer === p1, altrimenti BIANCO (180deg).
-        // Se il giocatore locale è il Guest (p2): p1 è comunque a sinistra nella schermata del sorteggio, 
-        // quindi per vedere la pedina dal punto di vista corretto del Guest invertiamo la visualizzazione della faccia.
         const isHost = (gameState.mode === 'single' || gameState.playerRoleInRoom === 'host');
 
         if (blackPlayerName === p1) {
@@ -500,7 +503,7 @@ function setupMultiplayerListener() {
             return;
         }
 
-        // Per la rivincita online: aggiorna i ruoli e avvia SUBITO la nuova partita invertendo i colori (senza rifare il sorteggio con la trottola)
+        // Sincronizzazione immediata della rivincita per entrambi i giocatori
         if (data.rematchTimestamp && data.rematchTimestamp !== lastRematchTimestamp) {
             lastRematchTimestamp = data.rematchTimestamp;
             gameState.blackName = data.blackPlayer;
@@ -516,7 +519,7 @@ function setupMultiplayerListener() {
             return;
         }
 
-        if (data.board && data.status !== 'finished') {
+        if (data.board) {
             const turnChanged = gameState.lastMove?.[0] !== data.lastMove?.[0] ||
                 gameState.lastMove?.[1] !== data.lastMove?.[1];
             if (turnChanged && data.lastMove) playSound('place');
@@ -528,6 +531,7 @@ function setupMultiplayerListener() {
 
             renderBoard(data.statusNote || 'Posiziona la tua pedina');
 
+            // APRE IL POPUP DI FINE PARTITA SU ENTRAMBI I DISPOSITIVI IN TEMPO REALE
             if (data.status === 'finished') {
                 showGameOver();
             }
@@ -687,6 +691,9 @@ function renderBoard(statusNote = 'Posiziona la tua pedina') {
 
 // --- RIVINCITA E FINE PARTITA ---
 function showGameOver() {
+    // Evita di riprodurre il suono o ricalcolare se il popup è già aperto
+    if (!document.getElementById('gameover-modal').classList.contains('hidden')) return;
+
     playSound('win');
     const counts = countPieces(gameState.board);
     document.getElementById('final-black').textContent = counts.black;
@@ -727,7 +734,6 @@ function showGameOver() {
 }
 
 async function requestRematch() {
-    // Inverte automaticamente i colori per la rivincita senza passare dal sorteggio con la trottola
     const oldBlack = gameState.blackName;
     gameState.blackName = gameState.whiteName;
     gameState.whiteName = oldBlack;
@@ -767,7 +773,7 @@ function closeExitModal() {
 async function confirmExit() {
     closeExitModal();
     if (gameState.mode === 'multi' && gameState.roomRef) {
-        await gameState.roomRef.update({ status: 'abandoned' });
+        await gameState.roomRef.remove(); // Rimuove completamente la stanza dal database liberandola
     }
     resetToLobby();
 }
