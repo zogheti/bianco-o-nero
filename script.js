@@ -270,7 +270,6 @@ async function joinMultiplayerRoom() {
             updatedAt: firebase.database.ServerValue.TIMESTAMP
         });
 
-        // Passa hostName come p1 e guestName come p2 in modo che la prospettiva del sorteggio sia identica
         openCoinTossModal(hostName, guestName, blackPlayer);
     } else {
         alert('Stanza già piena o partita in corso!');
@@ -278,7 +277,7 @@ async function joinMultiplayerRoom() {
     }
 }
 
-// --- POPUP SORTEGGIO CORRETTO ---
+// --- POPUP SORTEGGIO INIZIALE ---
 function openCoinTossModal(p1, p2, blackPlayerName) {
     const modal = document.getElementById('coin-modal');
     const coin = document.getElementById('spinning-coin');
@@ -301,12 +300,16 @@ function openCoinTossModal(p1, p2, blackPlayerName) {
     setTimeout(() => {
         coin.classList.remove('spinning');
 
-        // Se a iniziare è il primo giocatore (p1), mostra la faccia frontale (Nero -> 0deg),
-        // altrimenti mostra la faccia posteriore (Bianco -> 180deg)
+        // CORREZIONE PROSPETTICA:
+        // Se il giocatore locale è l'Host (p1): p1 è a sinistra, quindi NERO (0deg) se blackPlayer === p1, altrimenti BIANCO (180deg).
+        // Se il giocatore locale è il Guest (p2): p1 è comunque a sinistra nella schermata del sorteggio, 
+        // quindi per vedere la pedina dal punto di vista corretto del Guest invertiamo la visualizzazione della faccia.
+        const isHost = (gameState.mode === 'single' || gameState.playerRoleInRoom === 'host');
+
         if (blackPlayerName === p1) {
-            coin.style.transform = 'rotateY(0deg)';
+            coin.style.transform = isHost ? 'rotateY(0deg)' : 'rotateY(180deg)';
         } else {
-            coin.style.transform = 'rotateY(180deg)';
+            coin.style.transform = isHost ? 'rotateY(180deg)' : 'rotateY(0deg)';
         }
 
         playSound('place');
@@ -483,7 +486,6 @@ async function applyMove(row, col, color, flipped) {
 }
 
 // --- MULTIPLAYER LISTENER ---
-// --- NEL MULTIPLAYER LISTENER (quando l'host avvia il sorteggio o fa la rivincita) ---
 function setupMultiplayerListener() {
     let lastRematchTimestamp = 0;
 
@@ -498,6 +500,7 @@ function setupMultiplayerListener() {
             return;
         }
 
+        // Per la rivincita online: aggiorna i ruoli e avvia SUBITO la nuova partita invertendo i colori (senza rifare il sorteggio con la trottola)
         if (data.rematchTimestamp && data.rematchTimestamp !== lastRematchTimestamp) {
             lastRematchTimestamp = data.rematchTimestamp;
             gameState.blackName = data.blackPlayer;
@@ -507,12 +510,9 @@ function setupMultiplayerListener() {
             gameState.winsP2 = data.winsGuest || 0;
 
             document.getElementById('gameover-modal').classList.add('hidden');
-
-            // Definisce l'ordine visivo coerente per il sorteggio (Host a sinistra, Guest a destra)
-            const p1Name = data.host;
-            const p2Name = data.guest;
-
-            openCoinTossModal(p1Name, p2Name, gameState.blackName);
+            document.getElementById('label-black-name').textContent = gameState.blackName;
+            document.getElementById('label-white-name').textContent = gameState.whiteName;
+            startNewBoardGame();
             return;
         }
 
@@ -727,41 +727,32 @@ function showGameOver() {
 }
 
 async function requestRematch() {
-    if (gameState.mode === 'multi') {
-        if (gameState.roomRef) {
-            const snap = await gameState.roomRef.once('value');
-            const val = snap.val() || {};
-            const hostName = val.host;
-            const guestName = val.guest;
+    // Inverte automaticamente i colori per la rivincita senza passare dal sorteggio con la trottola
+    const oldBlack = gameState.blackName;
+    gameState.blackName = gameState.whiteName;
+    gameState.whiteName = oldBlack;
+    gameState.myColor = (gameState.blackName === gameState.playerName) ? BLACK : WHITE;
 
-            // Inverte i colori rispetto al match precedente in modo casuale o alternato
-            const hostIsBlack = Math.random() < 0.5;
-            const newBlack = hostIsBlack ? hostName : guestName;
-            const newWhite = hostIsBlack ? guestName : hostName;
-
-            await gameState.roomRef.update({
-                status: 'playing',
-                board: createInitialBoard(),
-                currentTurn: BLACK,
-                lastMove: null,
-                flippedCells: [],
-                blackPlayer: newBlack,
-                whitePlayer: newWhite,
-                winsHost: gameState.winsP1,
-                winsGuest: gameState.winsP2,
-                rematchTimestamp: Date.now(),
-                updatedAt: firebase.database.ServerValue.TIMESTAMP
-            });
-        }
-    } else {
-        const userIsBlack = Math.random() < 0.5;
-        gameState.blackName = userIsBlack ? gameState.playerName : gameState.opponentName;
-        gameState.whiteName = userIsBlack ? gameState.opponentName : gameState.playerName;
-        gameState.myColor = (gameState.blackName === gameState.playerName) ? BLACK : WHITE;
-
-        document.getElementById('gameover-modal').classList.add('hidden');
-        openCoinTossModal(gameState.playerName, gameState.opponentName, gameState.blackName);
+    if (gameState.mode === 'multi' && gameState.roomRef) {
+        await gameState.roomRef.update({
+            status: 'playing',
+            board: createInitialBoard(),
+            currentTurn: BLACK,
+            lastMove: null,
+            flippedCells: [],
+            blackPlayer: gameState.blackName,
+            whitePlayer: gameState.whiteName,
+            winsHost: gameState.winsP1,
+            winsGuest: gameState.winsP2,
+            rematchTimestamp: Date.now(),
+            updatedAt: firebase.database.ServerValue.TIMESTAMP
+        });
     }
+
+    document.getElementById('gameover-modal').classList.add('hidden');
+    document.getElementById('label-black-name').textContent = gameState.blackName;
+    document.getElementById('label-white-name').textContent = gameState.whiteName;
+    startNewBoardGame();
 }
 
 // --- MODALE DI USCITA PERSONALIZZATO ---
@@ -781,7 +772,6 @@ async function confirmExit() {
     resetToLobby();
 }
 
-printFullscreen = toggleFullscreen; // compatibilità
 function toggleFullscreen() {
     if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => { });
