@@ -1,0 +1,190 @@
+﻿<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bianco o Nero - Othello</title>
+    <link rel="icon" type="image/png" href="img/icona.png">
+    <link rel="stylesheet" href="style.css">
+    <!-- Firebase Compat SDK per funzionamento diretto su browser -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+</head>
+<body>
+
+    <!-- SCHERMATA PRINCIPALE (LOBBY) -->
+    <div id="lobby-screen" class="screen active">
+        <div class="lobby-card">
+            <div class="logo-discs">
+                <span class="disc-icon black"></span>
+                <span class="disc-icon white"></span>
+            </div>
+            <h1>BIANCO O NERO</h1>
+            <p class="subtitle">Strategia classica 8x8</p>
+
+            <div class="input-group">
+                <label for="player-name">Il tuo nome</label>
+                <input type="text" id="player-name" placeholder="Inserisci nome..." maxlength="15" autocomplete="off">
+            </div>
+
+            <!-- Scelta Modalità -->
+            <div class="mode-tabs">
+                <button id="tab-single" class="tab-btn active" onclick="selectMode('single')">Vs Computer</button>
+                <button id="tab-multi" class="tab-btn" onclick="selectMode('multi')">Multiplayer Online</button>
+            </div>
+
+            <!-- Opzioni Single Player -->
+            <div id="single-options" class="mode-panel">
+                <label>Livello Difficoltà</label>
+                <div class="difficulty-group">
+                    <button class="diff-btn" data-diff="easy" onclick="selectDifficulty('easy')">Facile</button>
+                    <button class="diff-btn active" data-diff="medium" onclick="selectDifficulty('medium')">Medio</button>
+                    <button class="diff-btn" data-diff="hard" onclick="selectDifficulty('hard')">Difficile</button>
+                </div>
+                <button id="btn-start-single" class="action-btn" disabled onclick="initSinglePlayer()">VAI ALLA PARTITA</button>
+            </div>
+
+            <!-- Opzioni Multiplayer -->
+            <div id="multi-options" class="mode-panel hidden">
+                <div class="input-group">
+                    <label for="room-code">Codice Stanza (es. 1234)</label>
+                    <div class="room-row">
+                        <input type="text" id="room-code" placeholder="Codice stanza..." maxlength="10" autocomplete="off">
+                        <button class="small-btn" onclick="generateRoomCode()" title="Genera codice">🎲</button>
+                    </div>
+                </div>
+                <div class="connection-badge">
+                    <span id="fb-dot" class="dot"></span>
+                    <span id="fb-status">Connessione al server...</span>
+                </div>
+                <button id="btn-join-room" class="action-btn" disabled onclick="joinMultiplayerRoom()">ENTRA NELLA STANZA</button>
+                <p id="waiting-msg" class="waiting-text hidden">In attesa dell'avversario nella stanza...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- POPUP SORTEGGIO PEDINA ROTANTE -->
+    <div id="coin-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Sorteggio Colore</h2>
+            <div class="players-vs">
+                <span id="toss-p1">Giocatore 1</span>
+                <span class="vs-badge">VS</span>
+                <span id="toss-p2">Giocatore 2</span>
+            </div>
+
+            <div class="coin-stage">
+                <div id="spinning-coin" class="coin">
+                    <div class="coin-face front"></div>
+                    <div class="coin-face back"></div>
+                </div>
+            </div>
+
+            <p id="toss-status" class="toss-info">La pedina sta girando...</p>
+
+            <div id="assigned-roles" class="roles-box hidden">
+                <div class="role-row">
+                    <span class="mini-disc black"></span>
+                    <span><strong>NERO (Inizia):</strong> <span id="black-player-name">-</span></span>
+                </div>
+                <div class="role-row">
+                    <span class="mini-disc white"></span>
+                    <span><strong>BIANCO:</strong> <span id="white-player-name">-</span></span>
+                </div>
+            </div>
+
+            <button id="btn-go-game" class="action-btn" disabled onclick="enterGameScreen()">VAI ALLA PARTITA</button>
+        </div>
+    </div>
+
+    <!-- SCHERMATA DI GIOCO -->
+    <div id="game-screen" class="screen">
+        <header class="top-bar">
+            <button class="top-btn" onclick="openExitModal()">← Esci</button>
+            <span id="room-indicator" class="room-tag"></span>
+            <div class="top-right-controls">
+                <button id="sound-btn" class="top-btn" onclick="toggleSound()" title="Audio">🔊</button>
+                <button id="fullscreen-btn" class="top-btn" onclick="toggleFullscreen()">⛶ Schermo Intero</button>
+            </div>
+        </header>
+
+        <main class="game-container">
+            <!-- Plancia 8x8 effetto 3D -->
+            <div class="board-frame">
+                <div id="board" class="board"></div>
+            </div>
+
+            <!-- Finestra Informazioni sotto la scacchiera -->
+            <div class="status-panel">
+                <div class="turn-banner" id="turn-banner">
+                    Turno di: <strong id="current-turn-name">-</strong>
+                    <span id="turn-disc-icon" class="mini-disc black"></span>
+                </div>
+
+                <div class="scores-grid">
+                    <div class="score-card black-card" id="card-black">
+                        <div class="score-header">
+                            <span class="mini-disc black"></span>
+                            <span id="label-black-name" class="p-name">Nero</span>
+                        </div>
+                        <div class="score-value" id="score-black">2</div>
+                    </div>
+
+                    <div class="score-card white-card" id="card-white">
+                        <div class="score-header">
+                            <span class="mini-disc white"></span>
+                            <span id="label-white-name" class="p-name">Bianco</span>
+                        </div>
+                        <div class="score-value" id="score-white">2</div>
+                    </div>
+                </div>
+
+                <div class="extra-info">
+                    <span>Mosse disponibili: <strong id="valid-moves-count">4</strong></span>
+                    <span id="game-message">Posiziona la tua pedina</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- POPUP FINE PARTITA -->
+    <div id="gameover-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="winner-title">Partita Terminata!</h2>
+            <p id="winner-subtitle" class="toss-info"></p>
+            <div class="final-scores">
+                <div><span class="mini-disc black"></span> <strong id="final-black">0</strong></div>
+                <div><span class="mini-disc white"></span> <strong id="final-white">0</strong></div>
+            </div>
+
+            <!-- Box Contatore Vittorie della Sessione -->
+            <div class="series-score-box">
+                <div class="series-title">Vittorie Totali Sessione</div>
+                <div class="series-stats">
+                    <span id="stat-p1-name">Giocatore 1</span>: <strong id="stat-p1-wins">0</strong> |
+                    <span id="stat-p2-name">Giocatore 2</span>: <strong id="stat-p2-wins">0</strong>
+                </div>
+            </div>
+
+            <div class="gameover-buttons">
+                <button class="action-btn" onclick="requestRematch()">GIOCA RIVINCITA</button>
+                <button class="secondary-btn" onclick="resetToLobby()">TORNA ALLA HOME</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALE PERSONALIZZATO CONFERMA USCITA -->
+    <div id="exit-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Abbandonare la partita?</h2>
+            <p class="toss-info">La partita in corso verrà persa.</p>
+            <div class="exit-buttons-row">
+                <button class="secondary-btn" onclick="closeExitModal()">Annulla</button>
+                <button class="action-btn danger-btn" onclick="confirmExit()">Esci</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
