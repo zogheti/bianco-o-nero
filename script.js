@@ -178,7 +178,7 @@ function setupRolesAndToss(p1, p2, p1IsBlack) {
     gameState.whiteName = p1IsBlack ? p2 : p1;
     gameState.myColor = (gameState.blackName === gameState.playerName) ? BLACK : WHITE;
 
-    openCoinTossModal(p1, p2, gameState.blackName, gameState.whiteName);
+    openCoinTossModal(p1, p2, gameState.blackName);
 }
 
 // --- MULTIPLAYER ---
@@ -240,7 +240,7 @@ async function joinMultiplayerRoom() {
 
                 if (document.getElementById('coin-modal').classList.contains('hidden') &&
                     !document.getElementById('game-screen').classList.contains('active')) {
-                    openCoinTossModal(data.host, data.guest, data.blackPlayer, data.whitePlayer);
+                    openCoinTossModal(data.host, data.guest, data.blackPlayer);
                 }
             }
         });
@@ -254,7 +254,6 @@ async function joinMultiplayerRoom() {
         gameState.winsP1 = roomData.winsHost || 0;
         gameState.winsP2 = roomData.winsGuest || 0;
 
-        // L'Host decide e salva il sorteggio una sola volta su Firebase per sincronizzare entrambi i client
         const hostIsBlack = Math.random() < 0.5;
         const blackPlayer = hostIsBlack ? hostName : guestName;
         const whitePlayer = hostIsBlack ? guestName : hostName;
@@ -271,15 +270,15 @@ async function joinMultiplayerRoom() {
             updatedAt: firebase.database.ServerValue.TIMESTAMP
         });
 
-        openCoinTossModal(hostName, guestName, blackPlayer, whitePlayer);
+        openCoinTossModal(hostName, guestName, blackPlayer);
     } else {
         alert('Stanza già piena o partita in corso!');
         btnJoin.disabled = false;
     }
 }
 
-// --- POPUP SORTEGGIO ---
-function openCoinTossModal(p1, p2, blackName, whiteName) {
+// --- POPUP SORTEGGIO CORRETTO ---
+function openCoinTossModal(p1, p2, blackPlayerName) {
     const modal = document.getElementById('coin-modal');
     const coin = document.getElementById('spinning-coin');
     const statusText = document.getElementById('toss-status');
@@ -300,13 +299,21 @@ function openCoinTossModal(p1, p2, blackName, whiteName) {
 
     setTimeout(() => {
         coin.classList.remove('spinning');
-        // Usa i nomi salvati per determinare la rotazione esatta su entrambi i dispositivi
-        coin.style.transform = (blackName === p1) ? 'rotateY(0deg)' : 'rotateY(180deg)';
+
+        // Se a iniziare è il primo giocatore (p1), mostra la faccia frontale (Nero -> 0deg),
+        // altrimenti mostra la faccia posteriore (Bianco -> 180deg)
+        if (blackPlayerName === p1) {
+            coin.style.transform = 'rotateY(0deg)';
+        } else {
+            coin.style.transform = 'rotateY(180deg)';
+        }
 
         playSound('place');
-        statusText.textContent = `Sorteggio completato! Inizia ${blackName}.`;
-        document.getElementById('black-player-name').textContent = blackName;
-        document.getElementById('white-player-name').textContent = whiteName;
+        statusText.textContent = `Sorteggio completato! Inizia ${blackPlayerName}.`;
+        document.getElementById('black-player-name').textContent = blackPlayerName;
+
+        const whitePlayerName = (blackPlayerName === p1) ? p2 : p1;
+        document.getElementById('white-player-name').textContent = whitePlayerName;
 
         rolesBox.classList.remove('hidden');
         btnGo.disabled = false;
@@ -498,13 +505,15 @@ function setupMultiplayerListener() {
             gameState.winsP2 = data.winsGuest || 0;
 
             document.getElementById('gameover-modal').classList.add('hidden');
-            document.getElementById('label-black-name').textContent = gameState.blackName;
-            document.getElementById('label-white-name').textContent = gameState.whiteName;
-            startNewBoardGame();
+
+            const p1Name = (gameState.playerRoleInRoom === 'host') ? data.host : data.guest;
+            const p2Name = (gameState.playerRoleInRoom === 'host') ? data.guest : data.host;
+
+            openCoinTossModal(p1Name, p2Name, gameState.blackName);
             return;
         }
 
-        if (data.board) {
+        if (data.board && data.status !== 'finished') {
             const turnChanged = gameState.lastMove?.[0] !== data.lastMove?.[0] ||
                 gameState.lastMove?.[1] !== data.lastMove?.[1];
             if (turnChanged && data.lastMove) playSound('place');
@@ -715,31 +724,41 @@ function showGameOver() {
 }
 
 async function requestRematch() {
-    const oldBlack = gameState.blackName;
-    gameState.blackName = gameState.whiteName;
-    gameState.whiteName = oldBlack;
-    gameState.myColor = (gameState.blackName === gameState.playerName) ? BLACK : WHITE;
+    if (gameState.mode === 'multi') {
+        if (gameState.roomRef) {
+            const snap = await gameState.roomRef.once('value');
+            const val = snap.val() || {};
+            const hostName = val.host;
+            const guestName = val.guest;
 
-    if (gameState.mode === 'multi' && gameState.roomRef) {
-        await gameState.roomRef.update({
-            status: 'playing',
-            board: createInitialBoard(),
-            currentTurn: BLACK,
-            lastMove: null,
-            flippedCells: [],
-            blackPlayer: gameState.blackName,
-            whitePlayer: gameState.whiteName,
-            winsHost: gameState.winsP1,
-            winsGuest: gameState.winsP2,
-            rematchTimestamp: Date.now(),
-            updatedAt: firebase.database.ServerValue.TIMESTAMP
-        });
+            // Inverte i colori rispetto al match precedente in modo casuale o alternato
+            const hostIsBlack = Math.random() < 0.5;
+            const newBlack = hostIsBlack ? hostName : guestName;
+            const newWhite = hostIsBlack ? guestName : hostName;
+
+            await gameState.roomRef.update({
+                status: 'playing',
+                board: createInitialBoard(),
+                currentTurn: BLACK,
+                lastMove: null,
+                flippedCells: [],
+                blackPlayer: newBlack,
+                whitePlayer: newWhite,
+                winsHost: gameState.winsP1,
+                winsGuest: gameState.winsP2,
+                rematchTimestamp: Date.now(),
+                updatedAt: firebase.database.ServerValue.TIMESTAMP
+            });
+        }
+    } else {
+        const userIsBlack = Math.random() < 0.5;
+        gameState.blackName = userIsBlack ? gameState.playerName : gameState.opponentName;
+        gameState.whiteName = userIsBlack ? gameState.opponentName : gameState.playerName;
+        gameState.myColor = (gameState.blackName === gameState.playerName) ? BLACK : WHITE;
+
+        document.getElementById('gameover-modal').classList.add('hidden');
+        openCoinTossModal(gameState.playerName, gameState.opponentName, gameState.blackName);
     }
-
-    document.getElementById('gameover-modal').classList.add('hidden');
-    document.getElementById('label-black-name').textContent = gameState.blackName;
-    document.getElementById('label-white-name').textContent = gameState.whiteName;
-    startNewBoardGame();
 }
 
 // --- MODALE DI USCITA PERSONALIZZATO ---
@@ -759,6 +778,7 @@ async function confirmExit() {
     resetToLobby();
 }
 
+printFullscreen = toggleFullscreen; // compatibilità
 function toggleFullscreen() {
     if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => { });
